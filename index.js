@@ -58,10 +58,11 @@ function isValidAuth(headers) {
 // Create proxy server
 const proxy = httpProxy.createProxyServer({
     changeOrigin: true,
-    xfwd: true,
+    xfwd: false,  // Changed to false to not add X-Forwarded headers
     secure: false,
     proxyTimeout: 30000,
-    timeout: 30000
+    timeout: 30000,
+    autoRewrite: true
 });
 
 // Proxy error handling
@@ -81,6 +82,23 @@ proxy.on('error', (err, req, res) => {
 
 // Log proxy events
 proxy.on('proxyReq', (proxyReq, req, res, options) => {
+     // Remove proxy-related headers
+     proxyReq.removeHeader('via');
+     proxyReq.removeHeader('x-forwarded-for');
+     proxyReq.removeHeader('x-forwarded-proto');
+     proxyReq.removeHeader('x-forwarded-host');
+     proxyReq.removeHeader('forwarded');
+     proxyReq.removeHeader('proxy-connection');
+     proxyReq.removeHeader('proxy-authenticate');
+     proxyReq.removeHeader('proxy-authorization');
+ 
+     // Set a common browser User-Agent
+     proxyReq.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+     
+     // Set common headers
+     proxyReq.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8');
+     proxyReq.setHeader('Accept-Language', 'en-US,en;q=0.9');
+     proxyReq.setHeader('Connection', 'keep-alive');
     console.log('[PROXY REQUEST]', {
         url: req.url,
         method: req.method,
@@ -148,12 +166,28 @@ const server = http.createServer((req, res) => {
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', '*');
 
+        delete req.headers['proxy-connection'];
+        delete req.headers['proxy-authenticate'];
+        delete req.headers['proxy-authorization'];
+        delete req.headers['forwarded'];
+        delete req.headers['x-forwarded-for'];
+        delete req.headers['x-forwarded-proto'];
+        delete req.headers['x-forwarded-host'];
+        delete req.headers['via'];
+
+
         // Forward the request
         proxy.web(req, res, { 
             target: targetUrl,
             secure: false,
             followRedirects: true,
-            changeOrigin: true
+            changeOrigin: true,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Connection': 'keep-alive'
+            }
         });
     } catch (error) {
         console.error('[SERVER ERROR]', error);
@@ -202,9 +236,7 @@ server.on('connect', (req, clientSocket, head) => {
         const targetSocket = net.connect(port, targetHost, () => {
             console.log('[TUNNEL CONNECTED]', req.url);
             
-            clientSocket.write('HTTP/1.1 200 Connection Established\r\n' +
-                             'Proxy-agent: Node.js-Proxy\r\n' +
-                             '\r\n');
+            clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
 
             targetSocket.pipe(clientSocket);
             clientSocket.pipe(targetSocket);
