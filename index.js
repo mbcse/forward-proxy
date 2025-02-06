@@ -1,21 +1,27 @@
 import http from 'http';
-import https from 'https';
+import net from 'net';
 import httpProxy from 'http-proxy';
-import url from 'url';
 
 const PORT = 8080;
+
+// Create a proxy server with custom agent
 const proxy = httpProxy.createProxyServer({
     changeOrigin: true,
     xfwd: true,
-    secure: false
+    secure: false,
+    // Increase timeouts
+    proxyTimeout: 30000,
+    timeout: 30000
 });
 
-// Detailed error logging for proxy events
+// Proxy error handling
 proxy.on('error', (err, req, res) => {
-    console.error('[PROXY ERROR] Proxy error:', err.message);
-    console.error('[PROXY ERROR] URL:', req.url);
-    console.error('[PROXY ERROR] Headers:', req.headers);
-    console.error('[PROXY ERROR] Stack:', err.stack);
+    console.error('[PROXY ERROR]', {
+        error: err.message,
+        url: req?.url,
+        headers: req?.headers,
+        stack: err.stack
+    });
     
     if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
@@ -23,125 +29,122 @@ proxy.on('error', (err, req, res) => {
     }
 });
 
-proxy.on('proxyReq', (proxyReq, req, res, options) => {
-    console.log('[PROXY REQUEST]', {
-        url: req.url,
-        method: req.method,
-        headers: proxyReq.getHeaders(),
-        target: options.target
-    });
-});
-
-proxy.on('proxyRes', (proxyRes, req, res) => {
-    console.log('[PROXY RESPONSE]', {
-        url: req.url,
-        statusCode: proxyRes.statusCode,
-        headers: proxyRes.headers
-    });
-});
-
+// Create server
 const server = http.createServer((req, res) => {
-    console.log(`[HTTP REQUEST] Incoming request:`, {
+    console.log('[HTTP REQUEST]', {
         url: req.url,
         method: req.method,
         headers: req.headers
     });
 
-    try {
-        // Parse the target URL
-        const targetUrl = req.url.startsWith('http') ? req.url : `http://${req.headers.host}${req.url}`;
-        console.log('[HTTP REQUEST] Target URL:', targetUrl);
+    // Handle CORS preflight
+    if (req.method === 'OPTIONS') {
+        res.writeHead(200, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': '*',
+            'Access-Control-Max-Age': '86400'
+        });
+        return res.end();
+    }
 
-        // Set required headers
-        req.headers['x-forwarded-for'] = req.connection.remoteAddress;
-        delete req.headers['origin']; // Remove origin to avoid CORS issues
+    // Set CORS headers for all responses
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+
+    try {
+        const targetUrl = req.url.startsWith('http') ? req.url : `http://${req.headers.host}${req.url}`;
+        console.log('[PROXY TARGET]', targetUrl);
 
         proxy.web(req, res, { 
             target: targetUrl,
             secure: false,
-            followRedirects: true
-        }, (err) => {
-            console.error('[HTTP ERROR] Proxy error:', err);
-            if (!res.headersSent) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Proxy error: ' + err.message);
-            }
+            followRedirects: true,
+            changeOrigin: true
         });
     } catch (error) {
-        console.error('[HTTP ERROR] Server error:', error);
-        if (!res.headersSent) {
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end('Server error: ' + error.message);
-        }
+        console.error('[SERVER ERROR]', error);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Server error: ' + error.message);
     }
 });
 
-// Enhanced HTTPS handling
-server.on('connect', (req, socket, head) => {
-    console.log('[HTTPS CONNECT] New CONNECT request:', {
+// Handle CONNECT for HTTPS
+server.on('connect', (req, clientSocket, head) => {
+    console.log('[HTTPS CONNECT]', {
         url: req.url,
         method: req.method,
         headers: req.headers
     });
 
-    try {
-        const [hostname, port = '443'] = req.url.split(':');
-        console.log('[HTTPS CONNECT] Parsed target:', { hostname, port });
+    // Parse the target
+    const [targetHost, targetPort] = req.url.split(':');
+    const port = parseInt(targetPort) || 443;
 
-        const options = {
-            port: parseInt(port),
-            host: hostname,
-            connectTimeout: 10000
-        };
+    console.log('[TUNNEL TARGET]', {
+        host: targetHost,
+        port: port
+    });
 
-        const proxySocket = new Promise((resolve, reject) => {
-            const conn = https.request(options)
-                .on('connect', (res, socket) => resolve(socket))
-                .on('error', reject)
-                .end();
+    // Create connection to target
+    const targetSocket = net.connect(port, targetHost, () => {
+        console.log('[TUNNEL CONNECTED]', req.url);
+        
+        // Tell the client the tunnel is established
+        clientSocket.write('HTTP/1.1 200 Connection Established\r\n' +
+                         'Proxy-agent: Node.js-Proxy\r\n' +
+                         '\r\n');
+
+        // Create tunnel
+        targetSocket.pipe(clientSocket);
+        clientSocket.pipe(targetSocket);
+    });
+
+    // Handle target connection errors
+    targetSocket.on('error', (err) => {
+        console.error('[TUNNEL ERROR]', {
+            error: err.message,
+            target: req.url
         });
+        clientSocket.end();
+    });
 
-        proxySocket.then(targetSocket => {
-            console.log('[HTTPS CONNECT] Connection established');
-            socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-            
-            targetSocket.pipe(socket);
-            socket.pipe(targetSocket);
-
-            targetSocket.on('error', (err) => {
-                console.error('[HTTPS ERROR] Target socket error:', err);
-                socket.end();
-            });
-
-            socket.on('error', (err) => {
-                console.error('[HTTPS ERROR] Client socket error:', err);
-                targetSocket.end();
-            });
-
-        }).catch(err => {
-            console.error('[HTTPS ERROR] Connection failed:', err);
-            socket.end();
+    // Handle client connection errors
+    clientSocket.on('error', (err) => {
+        console.error('[CLIENT ERROR]', {
+            error: err.message,
+            target: req.url
         });
+        targetSocket.end();
+    });
 
-    } catch (error) {
-        console.error('[HTTPS ERROR] CONNECT handling error:', error);
-        socket.end();
-    }
+    // Clean up on connection end
+    targetSocket.on('end', () => {
+        console.log('[TUNNEL END]', req.url);
+        clientSocket.end();
+    });
+
+    clientSocket.on('end', () => {
+        console.log('[CLIENT END]', req.url);
+        targetSocket.end();
+    });
 });
 
-server.listen(PORT, () => {
-    console.log(`[SERVER] Proxy server running on http://localhost:${PORT}`);
+// Start server
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[SERVER STARTED] Proxy server running on http://0.0.0.0:${PORT}`);
 });
 
-// Handle server errors
+// Global error handlers
 server.on('error', (err) => {
-    console.error('[SERVER ERROR] Server error:', err);
+    console.error('[SERVER ERROR]', err);
 });
 
 process.on('uncaughtException', (err) => {
-    console.error('[PROCESS ERROR] Uncaught exception:', err);
+    console.error('[UNCAUGHT EXCEPTION]', err);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('[PROCESS ERROR] Unhandled rejection:', reason);
+    console.error('[UNHANDLED REJECTION]', reason);
 });
