@@ -6,8 +6,8 @@ const PORT = 8080;
 
 // Valid access tokens (in real implementation, this should be in a secure database)
 const VALID_TOKENS = new Set([
-    'your-secret-token-1',
-    'your-secret-token-2'
+    '12345',
+    '111111'
 ]);
 
 // Define allowed domains
