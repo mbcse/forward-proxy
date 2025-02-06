@@ -17,7 +17,7 @@ const ALLOWED_DOMAINS = [
     'api.twitter.com',
     'pbs.twimg.com',
     'video.twimg.com',
-    'https://whatismyipaddress.com/'
+    'whatismyipaddress.com'
 ];
 
 // Helper function to check if domain should be proxied
