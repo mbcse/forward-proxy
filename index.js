@@ -58,7 +58,7 @@ function isValidAuth(headers) {
 // Create proxy server
 const proxy = httpProxy.createProxyServer({
     changeOrigin: true,
-    xfwd: false,  // Changed to false to not add X-Forwarded headers
+    xfwd: true,  // Changed to false to not add X-Forwarded headers
     secure: false,
     proxyTimeout: 30000,
     timeout: 30000,
