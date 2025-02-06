@@ -4,13 +4,11 @@ import httpProxy from 'http-proxy';
 
 const PORT = 8080;
 
-// Define valid access tokens (in production, use a secure database)
 const VALID_TOKENS = new Set([
     'token123',
     'token456'
 ]);
 
-// Define allowed domains
 const ALLOWED_DOMAINS = [
     'twitter.com',
     'x.com',
@@ -20,14 +18,12 @@ const ALLOWED_DOMAINS = [
     'whatismyipaddress.com'
 ];
 
-// Helper function to check if domain should be proxied
 function shouldProxy(hostname) {
     return ALLOWED_DOMAINS.some(domain => 
         hostname === domain || hostname.endsWith('.' + domain)
     );
 }
 
-// Helper function to extract and validate basic auth credentials
 function extractBasicAuth(headers) {
     const authHeader = headers['proxy-authorization'] || '';
     if (authHeader.startsWith('Basic ')) {
@@ -65,7 +61,6 @@ const proxy = httpProxy.createProxyServer({
     autoRewrite: true
 });
 
-// Proxy error handling
 proxy.on('error', (err, req, res) => {
     console.error('[PROXY ERROR]', {
         error: err.message,
@@ -92,7 +87,7 @@ proxy.on('proxyReq', (proxyReq, req, res, options) => {
      proxyReq.removeHeader('proxy-authenticate');
      proxyReq.removeHeader('proxy-authorization');
  
-     // Set a common browser User-Agent
+     // Set browser User-Agent
      proxyReq.setHeader('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36');
      
      // Set common headers
@@ -242,7 +237,6 @@ server.on('connect', (req, clientSocket, head) => {
             clientSocket.pipe(targetSocket);
         });
 
-        // Handle target connection errors
         targetSocket.on('error', (err) => {
             console.error('[TUNNEL ERROR]', {
                 error: err.message,
@@ -251,7 +245,6 @@ server.on('connect', (req, clientSocket, head) => {
             clientSocket.end();
         });
 
-        // Handle client connection errors
         clientSocket.on('error', (err) => {
             console.error('[CLIENT ERROR]', {
                 error: err.message,
@@ -260,7 +253,6 @@ server.on('connect', (req, clientSocket, head) => {
             targetSocket.end();
         });
 
-        // Clean up on connection end
         targetSocket.on('end', () => {
             console.log('[TUNNEL END]', req.url);
             clientSocket.end();
@@ -283,7 +275,6 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log('[ALLOWED DOMAINS]', ALLOWED_DOMAINS);
 });
 
-// Global error handlers
 server.on('error', (err) => {
     console.error('[SERVER ERROR]', err);
 });
