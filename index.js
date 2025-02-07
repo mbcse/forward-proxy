@@ -30,6 +30,7 @@ function extractBasicAuth(headers) {
         const encodedCreds = authHeader.slice(6);
         const decodedCreds = Buffer.from(encodedCreds, 'base64').toString('utf-8');
         const [username, password] = decodedCreds.split(':');
+        console.log(username, password);
         return { username, password };
     }
     return null;
@@ -42,6 +43,8 @@ function isValidAuth(headers) {
         console.log('[AUTH] No credentials provided');
         return false;
     }
+
+    console.log(headers)
     
     const isValid = VALID_TOKENS.has(creds.username);
     console.log('[AUTH] Token validation:', { 
